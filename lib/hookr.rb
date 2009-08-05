@@ -1,5 +1,4 @@
 require 'set'
-require 'generator'
 require 'rubygems'
 require 'fail_fast'
 
@@ -238,7 +237,7 @@ module HookR
     private
 
     def execute_hook_recursively(hook_name, event, block)
-      event.callbacks = callback_generator(hook_name, block)
+      event.callbacks = callback_enumerator(hook_name, block)
       event.next
     end
 
@@ -247,23 +246,21 @@ module HookR
       fetch_or_create_hooks[hook_name].execute_callbacks(event)
     end
 
-    # Returns a Generator which yields:
+    # Returns an Enumerator which yields:
     # 1. Wildcard callbacks, in reverse order, followed by
     # 2. +hook_name+ callbacks, in reverse order, followed by
     # 3. a proc which delegates to +block+
     #
     # Intended for use with recursive hook execution.
-    def callback_generator(hook_name, block)
-      Generator.new do |g|
+    def callback_enumerator(hook_name, block)
+      Enumerator.new do |g|
         fetch_or_create_hooks[:__wildcard__].each_callback_reverse do |callback|
           g.yield callback
         end
         fetch_or_create_hooks[hook_name].each_callback_reverse do |callback|
           g.yield callback
         end
-        g.yield(lambda do |event|
-                  block.call(*event.arguments)
-                end)
+        g.yield(lambda{|event|block.call(*event.arguments)})
       end
     end
 
@@ -480,8 +477,8 @@ module HookR
     # Fetch callback by either index or handle
     def [](index)
       case index
-      when Integer then detect{|cb| cb.index == index}
-      when Symbol  then detect{|cb| cb.handle == index}
+      when Integer then dup.detect{|cb| cb.index == index}
+      when Symbol  then dup.detect{|cb| cb.handle == index}
       else raise ArgumentError, "index must be Integer or Symbol"
       end
     end
@@ -624,9 +621,9 @@ module HookR
       assert(recursive, callbacks)
       event = self.class.new(source, name, arguments, recursive, callbacks)
       event.arguments = args unless args.empty?
-      if callbacks.next?
+      begin
         callbacks.next.call(event)
-      else
+      rescue StopIteration
         raise "No more callbacks!"
       end
     end
